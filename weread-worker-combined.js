@@ -3,7 +3,7 @@
 // POST / → 代理微信读书 API
 
 const API_KEY = 'wrk-k3GuXDMlQmmo8Lhjlx6r6QAA';
-const GEMINI_API_KEY = 'AQ.Ab8RN6KKh3vLC--fkIk-YWXvnnxVrTC5MvRyQeIdzyW3ZGaY6Q';
+const GEMINI_API_KEY = 'AQ.Ab8RN6L4OZbVfAkd4pAqUk0dXTBeAkmfSD6nEqSsObNPsWkUYQ';
 const API_GATEWAY = 'https://i.weread.qq.com/api/agent/gateway';
 
 const ACTION_MAP = {
