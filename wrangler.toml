@@ -1,3 +1,7 @@
 name = "weread"
 main = "weread-worker-combined.js"
 compatibility_date = "2025-11-01"
+
+[[kv_namespaces]]
+binding = "WR_KV"
+id = "577271edb8d54c00aea3824960598c3d"
