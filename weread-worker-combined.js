@@ -3,7 +3,6 @@
 // POST / → 代理微信读书 API
 
 const API_KEY = 'wrk-k3GuXDMlQmmo8Lhjlx6r6QAA';
-const GEMINI_API_KEY = 'AQ.Ab8RN6L4OZbVfAkd4pAqUk0dXTBeAkmfSD6nEqSsObNPsWkUYQ';
 const API_GATEWAY = 'https://i.weread.qq.com/api/agent/gateway';
 
 const ACTION_MAP = {
@@ -22,6 +21,7 @@ const CORS_HEADERS = {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const GEMINI_API_KEY = env.GEMINI_API_KEY;
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
@@ -84,7 +84,7 @@ export default {
           });
         }
         if (!GEMINI_API_KEY) {
-          return new Response(JSON.stringify({ error: '请先在 Worker 代码中配置 GEMINI_API_KEY' }), {
+          return new Response(JSON.stringify({ error: '请在 Cloudflare Worker Secrets 中配置 GEMINI_API_KEY' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
           });
