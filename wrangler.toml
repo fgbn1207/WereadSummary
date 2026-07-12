@@ -1,0 +1,3 @@
+name = "weread"
+main = "weread-worker-combined.js"
+compatibility_date = "2025-11-01"
