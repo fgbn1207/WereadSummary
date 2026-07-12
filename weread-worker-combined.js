@@ -190,7 +190,49 @@ export default {
       }
     }
 
-\n    // POST /kv/chat/load → 加载指定结果的聊天记录\n    if (request.method === 'POST' \u0026\u0026 url.pathname === '/kv/chat/load') {\n      if (!env.WR_KV) {\n        return new Response(JSON.stringify({ ok: false, messages: [] }), { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });\n      }\n      try {\n        var body = await request.json();\n        var resultId = body.resultId;\n        var key = 'wr_chat_' + resultId;\n        var messages = await env.WR_KV.get(key, 'json') || [];\n        return new Response(JSON.stringify({ ok: true, messages: messages }), {\n          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }\n        });\n      } catch(e) {\n        return new Response(JSON.stringify({ ok: false, messages: [], error: e.message }), {\n          status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }\n        });\n      }\n    }\n\n    // POST /kv/chat/save → 保存指定结果的聊天记录\n    if (request.method === 'POST' \u0026\u0026 url.pathname === '/kv/chat/save') {\n      if (!env.WR_KV) {\n        return new Response(JSON.stringify({ ok: false, error: 'KV not configured' }), { status: 503, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });\n      }\n      try {\n        var body = await request.json();\n        var resultId = body.resultId;\n        var messages = body.messages || [];\n        var key = 'wr_chat_' + resultId;\n        await env.WR_KV.put(key, JSON.stringify(messages), { expirationTtl: 7776000 });\n        return new Response(JSON.stringify({ ok: true }), {\n          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }\n        });\n      } catch(e) {\n        return new Response(JSON.stringify({ ok: false, error: e.message }), {\n          status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }\n        });\n      }\n    }\n\n    // POST /chat → 多轮对话（基于生成内容的上下文）
+
+    // POST /kv/chat/load → 加载指定结果的聊天记录
+    if (request.method === 'POST' && url.pathname === '/kv/chat/load') {
+      if (!env.WR_KV) {
+        return new Response(JSON.stringify({ ok: false, messages: [] }), { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+      }
+      try {
+        var body = await request.json();
+        var resultId = body.resultId;
+        var key = 'wr_chat_' + resultId;
+        var messages = await env.WR_KV.get(key, 'json') || [];
+        return new Response(JSON.stringify({ ok: true, messages: messages }), {
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      } catch(e) {
+        return new Response(JSON.stringify({ ok: false, messages: [], error: e.message }), {
+          status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      }
+    }
+
+    // POST /kv/chat/save → 保存指定结果的聊天记录
+    if (request.method === 'POST' && url.pathname === '/kv/chat/save') {
+      if (!env.WR_KV) {
+        return new Response(JSON.stringify({ ok: false, error: 'KV not configured' }), { status: 503, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+      }
+      try {
+        var body = await request.json();
+        var resultId = body.resultId;
+        var messages = body.messages || [];
+        var key = 'wr_chat_' + resultId;
+        await env.WR_KV.put(key, JSON.stringify(messages), { expirationTtl: 7776000 });
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      } catch(e) {
+        return new Response(JSON.stringify({ ok: false, error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      }
+    }
+
+    // POST /chat → 多轮对话（基于生成内容的上下文）
     if (request.method === 'POST' && url.pathname === '/chat') {
       if (!env || !GEMINI_API_KEY) {
         return new Response(JSON.stringify({ error: 'API Key not configured' }), {
