@@ -18,6 +18,55 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// Gemini 模型降级列表（优先级从高到低）
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+// 调用 Gemini API，支持模型自动降级
+async function callGeminiWithFallback(apiKey, contents, generationConfig) {
+  let lastError = null;
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const model = GEMINI_MODELS[i];
+    try {
+      const resp = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents, generationConfig })
+        }
+      );
+      const data = await resp.json();
+      if (data.error) {
+        lastError = data.error.message;
+        // 如果是 high demand 或资源耗尽错误，尝试下一个模型
+        if (data.error.message && (
+          data.error.message.includes('high demand') ||
+          data.error.message.includes('resource') ||
+          data.error.message.includes('overloaded') ||
+          data.error.message.includes('quota') ||
+          data.error.code === 429 ||
+          data.error.code === 503
+        )) {
+          continue;
+        }
+        // 其他错误直接返回
+        return { error: 'Gemini API 错误: ' + data.error.message };
+      }
+      const text = data.candidates && data.candidates[0] && data.candidates[0].content
+        ? data.candidates[0].content.parts[0].text
+        : null;
+      if (!text) {
+        return { error: '生成失败：未返回有效内容' };
+      }
+      return { text };
+    } catch (e) {
+      lastError = e.message;
+      continue;
+    }
+  }
+  return { error: '所有 Gemini 模型均不可用，最后错误: ' + lastError };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -89,31 +138,17 @@ export default {
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
           });
         }
-        const geminiResp = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' + GEMINI_API_KEY,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 8192
-              }
-            })
-          }
+        const result = await callGeminiWithFallback(
+          GEMINI_API_KEY,
+          [{ parts: [{ text: prompt }] }],
+          { temperature: 0.7, maxOutputTokens: 8192 }
         );
-        const geminiData = await geminiResp.json();
-        if (geminiData.error) {
-          return new Response(JSON.stringify({ error: 'Gemini API 错误: ' + geminiData.error.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        if (result.error) {
+          return new Response(JSON.stringify({ error: result.error }), {
+            status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
           });
         }
-        const text = geminiData.candidates && geminiData.candidates[0] && geminiData.candidates[0].content
-          ? geminiData.candidates[0].content.parts[0].text
-          : '生成失败：未返回有效内容';
-        return new Response(JSON.stringify({ text: text }), {
+        return new Response(JSON.stringify({ text: result.text }), {
           headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
         });
       } catch (e) {
@@ -266,30 +301,17 @@ export default {
           });
         });
 
-        var geminiResp = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' + GEMINI_API_KEY,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: contents,
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 4096
-              }
-            })
-          }
+        var result = await callGeminiWithFallback(
+          GEMINI_API_KEY,
+          contents,
+          { temperature: 0.7, maxOutputTokens: 4096 }
         );
-        var geminiData = await geminiResp.json();
-        if (geminiData.error) {
-          return new Response(JSON.stringify({ error: 'Gemini API 错误: ' + geminiData.error.message }), {
+        if (result.error) {
+          return new Response(JSON.stringify({ error: result.error }), {
             status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
           });
         }
-        var text = geminiData.candidates && geminiData.candidates[0] && geminiData.candidates[0].content
-          ? geminiData.candidates[0].content.parts[0].text
-          : '生成失败：未返回有效内容';
-        return new Response(JSON.stringify({ text: text }), {
+        return new Response(JSON.stringify({ text: result.text }), {
           headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
         });
       } catch(e) {
