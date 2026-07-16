@@ -19,7 +19,7 @@ const CORS_HEADERS = {
 };
 
 // Gemini 模型降级列表（优先级从高到低）
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'];
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite'];
 
 // 调用 Gemini API，支持模型自动降级
 async function callGeminiWithFallback(apiKey, contents, generationConfig) {
