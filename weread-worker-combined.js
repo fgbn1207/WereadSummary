@@ -520,63 +520,69 @@ export default {
         } catch(e) {}
 
         // 4. 调用微信读书 API 获取公众号文章列表
-        // 优先使用 /book/articles 接口（公众号专用），回退到 /book/chapterinfo（普通书）
+        // 优先直连 /book/articles（公众号专用），回退到 /book/chapterinfo
         var articles = [];
-        var mpData = null;
 
-        // 尝试 /book/articles（公众号专用接口）
-        const mpResp = await fetch(API_GATEWAY, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
-          body: JSON.stringify({ api_name: '/book/articles', bookId: bookId, count: 20, synckey: 0, skill_version: '1.0.4' })
-        });
-
-        console.log('[MP-ARTICLES] /book/articles resp.ok:', mpResp.ok, 'status:', mpResp.status, 'bookId:', bookId);
-
-        if (mpResp.ok) {
-          mpData = await mpResp.json();
-          console.log('[MP-ARTICLES] /book/articles keys:', Object.keys(mpData), 'reviews:', (mpData.reviews||[]).length, 'chapters:', (mpData.chapters||[]).length, 'bookId:', bookId);
-          // /book/articles 返回 reviews 数组（每个 review 包含 review.review 子对象）
-          var rawReviews = mpData.reviews || [];
-          if (rawReviews.length > 0) {
-            articles = rawReviews.map(function(item) {
-              var review = item.review || item;
-              var date = '';
-              if (review.createTime) {
-                var d = new Date(review.createTime * 1000);
-                date = d.toISOString().substring(0, 10);
-              } else if (review.updateTime) {
-                var d2 = new Date(review.updateTime * 1000);
-                date = d2.toISOString().substring(0, 10);
+        // 尝试直连 /book/articles（需要 WEREAD_COOKIE 环境变量）
+        const WEREAD_COOKIE = env.WEREAD_COOKIE || '';
+        if (WEREAD_COOKIE) {
+          try {
+            const directUrl = 'https://i.weread.qq.com/book/articles?bookId=' + encodeURIComponent(bookId) + '&count=20&synckey=0';
+            console.log('[MP-ARTICLES] Direct /book/articles URL:', directUrl);
+            const directResp = await fetch(directUrl, {
+              headers: {
+                'Cookie': WEREAD_COOKIE,
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
               }
-              return {
-                title: review.title || review.chapterTitle || '',
-                url: review.url || review.mpLink || '',
-                deepLink: '',
-                date: date,
-                readCount: 0,
-                likeCount: 0,
-                cover: review.cover || ''
-              };
             });
-          }
-          // 如果 reviews 为空，尝试 chapters（普通书兼容）
-          if (articles.length === 0) {
-            var rawChapters = mpData.chapters || [];
-            articles = rawChapters.map(function(ch) {
-              var date = '';
-              if (ch.updateTime) {
-                var d = new Date(ch.updateTime * 1000);
-                date = d.toISOString().substring(0, 10);
+            console.log('[MP-ARTICLES] Direct /book/articles status:', directResp.status, 'ok:', directResp.ok, 'bookId:', bookId);
+            if (directResp.ok) {
+              const directData = await directResp.json();
+              console.log('[MP-ARTICLES] Direct resp keys:', Object.keys(directData), 'reviews:', (directData.reviews||[]).length, 'bookId:', bookId);
+              var rawReviews = directData.reviews || [];
+              if (rawReviews.length > 0) {
+                articles = rawReviews.map(function(item) {
+                  var review = item.review || item;
+                  var date = '';
+                  if (review.createTime) {
+                    var d = new Date(review.createTime * 1000);
+                    date = d.toISOString().substring(0, 10);
+                  } else if (review.updateTime) {
+                    var d2 = new Date(review.updateTime * 1000);
+                    date = d2.toISOString().substring(0, 10);
+                  }
+                  return {
+                    title: review.title || review.chapterTitle || '',
+                    url: review.url || review.mpLink || '',
+                    deepLink: '',
+                    date: date,
+                    readCount: review.readCount || 0,
+                    likeCount: review.likeCount || 0,
+                    cover: review.cover || ''
+                  };
+                });
               }
-              return { title: ch.title || '', url: '', deepLink: '', date: date, readCount: 0, likeCount: 0, cover: '' };
-            });
+            } else {
+              // 尝试读取错误响应体
+              var errBody = '';
+              try { errBody = await directResp.text(); } catch(e) {}
+              console.log('[MP-ARTICLES] Direct /book/articles failed, body:', errBody.substring(0, 200));
+              if (directResp.status === 401) {
+                return new Response(JSON.stringify({ error: 'cookie_expired', articles: [] }), {
+                  status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+                });
+              }
+            }
+          } catch(e) {
+            console.log('[MP-ARTICLES] Direct /book/articles error:', e.message);
           }
+        } else {
+          console.log('[MP-ARTICLES] No WEREAD_COOKIE set, skipping direct /book/articles');
         }
 
-        // 如果 /book/articles 失败或返回空，尝试 /book/chapterinfo 回退
+        // 回退：通过 Agent API gateway 调用 /book/chapterinfo
         if (articles.length === 0) {
-          console.log('[MP-ARTICLES] /book/articles returned empty, trying /book/chapterinfo fallback');
+          console.log('[MP-ARTICLES] Trying /book/chapterinfo fallback via gateway');
           const fallbackResp = await fetch(API_GATEWAY, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
