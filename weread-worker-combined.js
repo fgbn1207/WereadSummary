@@ -494,14 +494,18 @@ export default {
           });
         }
 
-        // 1. 检查 KV 缓存（1小时有效）
+        // 1. 检查 KV 缓存（1小时有效，但空结果不缓存）
         const cacheKey = 'mp_articles_' + bookId;
         const cached = await env.WR_KV.get(cacheKey);
         if (cached) {
           const cachedData = JSON.parse(cached);
-          return new Response(JSON.stringify({ ok: true, ...cachedData, _cached: true }), {
-            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
-          });
+          if (cachedData.articles && cachedData.articles.length > 0) {
+            return new Response(JSON.stringify({ ok: true, ...cachedData, _cached: true }), {
+              headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+            });
+          }
+          // 空结果不缓存，删掉旧缓存
+          await env.WR_KV.delete(cacheKey);
         }
 
         // 2. 获取公众号基本信息和文章列表（Agent API）
@@ -515,47 +519,85 @@ export default {
           bookInfo = await infoResp.json();
         } catch(e) {}
 
-        // 4. 调用微信读书 Web API 获取文章列表
+        // 4. 调用微信读书 API 获取公众号文章列表
+        // 优先使用 /book/articles 接口（公众号专用），回退到 /book/chapterinfo（普通书）
+        var articles = [];
+        var mpData = null;
+
+        // 尝试 /book/articles（公众号专用接口）
         const mpResp = await fetch(API_GATEWAY, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
-          body: JSON.stringify({ api_name: '/book/chapterinfo', bookId: bookId, synckey: 0 })
+          body: JSON.stringify({ api_name: '/book/articles', bookId: bookId, count: 20, synckey: 0, skill_version: '1.0.4' })
         });
 
-        console.log('[MP-ARTICLES] mpResp.ok:', mpResp.ok, 'status:', mpResp.status, 'bookId:', bookId);
-        if (!mpResp.ok) {
-          // API 调用失败，返回 fallback
-          return new Response(JSON.stringify({
-            ok: true,
-            bookId: bookId,
-            title: bookInfo.title || '',
-            intro: bookInfo.intro || '',
-            deepLink: bookInfo.deepLink || '',
-            articles: []
-          }), {
-            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
-          });
+        console.log('[MP-ARTICLES] /book/articles resp.ok:', mpResp.ok, 'status:', mpResp.status, 'bookId:', bookId);
+
+        if (mpResp.ok) {
+          mpData = await mpResp.json();
+          console.log('[MP-ARTICLES] /book/articles keys:', Object.keys(mpData), 'reviews:', (mpData.reviews||[]).length, 'chapters:', (mpData.chapters||[]).length, 'bookId:', bookId);
+          // /book/articles 返回 reviews 数组（每个 review 包含 review.review 子对象）
+          var rawReviews = mpData.reviews || [];
+          if (rawReviews.length > 0) {
+            articles = rawReviews.map(function(item) {
+              var review = item.review || item;
+              var date = '';
+              if (review.createTime) {
+                var d = new Date(review.createTime * 1000);
+                date = d.toISOString().substring(0, 10);
+              } else if (review.updateTime) {
+                var d2 = new Date(review.updateTime * 1000);
+                date = d2.toISOString().substring(0, 10);
+              }
+              return {
+                title: review.title || review.chapterTitle || '',
+                url: review.url || review.mpLink || '',
+                deepLink: '',
+                date: date,
+                readCount: 0,
+                likeCount: 0,
+                cover: review.cover || ''
+              };
+            });
+          }
+          // 如果 reviews 为空，尝试 chapters（普通书兼容）
+          if (articles.length === 0) {
+            var rawChapters = mpData.chapters || [];
+            articles = rawChapters.map(function(ch) {
+              var date = '';
+              if (ch.updateTime) {
+                var d = new Date(ch.updateTime * 1000);
+                date = d.toISOString().substring(0, 10);
+              }
+              return { title: ch.title || '', url: '', deepLink: '', date: date, readCount: 0, likeCount: 0, cover: '' };
+            });
+          }
         }
 
-        const mpData = await mpResp.json();
-        console.log('[MP-ARTICLES] mpData keys:', Object.keys(mpData), 'chapters:', (mpData.chapters||[]).length, 'bookId:', bookId);
-        const rawChapters = mpData.chapters || [];
-        const articles = rawChapters.map(function(ch) {
-          var date = '';
-          if (ch.updateTime) {
-            var d = new Date(ch.updateTime * 1000);
-            date = d.toISOString().substring(0, 10);
+        // 如果 /book/articles 失败或返回空，尝试 /book/chapterinfo 回退
+        if (articles.length === 0) {
+          console.log('[MP-ARTICLES] /book/articles returned empty, trying /book/chapterinfo fallback');
+          const fallbackResp = await fetch(API_GATEWAY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
+            body: JSON.stringify({ api_name: '/book/chapterinfo', bookId: bookId, synckey: 0 })
+          });
+          if (fallbackResp.ok) {
+            const fallbackData = await fallbackResp.json();
+            console.log('[MP-ARTICLES] /book/chapterinfo chapters:', (fallbackData.chapters||[]).length, 'bookId:', bookId);
+            var fbChapters = fallbackData.chapters || [];
+            articles = fbChapters.map(function(ch) {
+              var date = '';
+              if (ch.updateTime) {
+                var d = new Date(ch.updateTime * 1000);
+                date = d.toISOString().substring(0, 10);
+              }
+              return { title: ch.title || '', url: '', deepLink: '', date: date, readCount: 0, likeCount: 0, cover: '' };
+            });
           }
-          return {
-            title: ch.title || '',
-            url: '',
-            deepLink: '',
-            date: date,
-            readCount: 0,
-            likeCount: 0,
-            cover: ''
-          };
-        });
+        }
+
+        console.log('[MP-ARTICLES] final articles count:', articles.length, 'bookId:', bookId);
 
         // 5. 缓存到 KV（1小时）
         const resultData = {
