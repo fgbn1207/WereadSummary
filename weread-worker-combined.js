@@ -532,7 +532,10 @@ export default {
             const directResp = await fetch(directUrl, {
               headers: {
                 'Cookie': WEREAD_COOKIE,
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://weread.qq.com/',
+                'Origin': 'https://weread.qq.com',
+                'Accept': 'application/json, text/plain, */*'
               }
             });
             console.log('[MP-ARTICLES] Direct /book/articles status:', directResp.status, 'ok:', directResp.ok, 'bookId:', bookId);
