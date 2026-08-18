@@ -628,6 +628,108 @@ export default {
       }
     }
 
+    // === 公众号更新监控诊断端点（不影响现有功能） ===
+
+    // GET /mp/diag → 检查公众号元数据变化（用于验证更新检测可行性）
+    if (request.method === 'GET' && url.pathname === '/mp/diag') {
+      try {
+        const resp = await fetch(API_GATEWAY, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + API_KEY
+          },
+          body: JSON.stringify({ api_name: '/shelf/sync', skill_version: '1.0.4', synckey: 0, count: 5 })
+        });
+        const data = await resp.json();
+        const booksMap = {};
+        (data.books || []).forEach(function(b) { booksMap[b.bookId] = b; });
+
+        // 收集所有公众号的元数据
+        var mpAccounts = [];
+        (data.archive || []).forEach(function(cat) {
+          (cat.bookIds || []).forEach(function(id) {
+            if (id.startsWith('MP_WXS_') && booksMap[id]) {
+              var b = booksMap[id];
+              mpAccounts.push({
+                bookId: id,
+                title: b.title || '',
+                updateTime: b.updateTime || 0,
+                lastUpdated: b.lastUpdated || 0,
+                sort: b.sort || 0,
+                timestamp_keys: Object.keys(b).filter(function(k) { return k.toLowerCase().includes('time') || k.toLowerCase().includes('update') || k.toLowerCase().includes('sort') || k.toLowerCase().includes('modif'); })
+              });
+            }
+          });
+        });
+
+        // 读取上次保存的状态
+        var prevRaw = null;
+        if (env.WR_KV) {
+          prevRaw = await env.WR_KV.get('mp_monitor_snap', 'json');
+        }
+
+        // 对比变化
+        var prevMap = {};
+        if (prevRaw && Array.isArray(prevRaw)) {
+          prevRaw.forEach(function(p) { prevMap[p.bookId] = p; });
+        }
+        var changes = [];
+        mpAccounts.forEach(function(a) {
+          var prev = prevMap[a.bookId];
+          if (prev) {
+            if (prev.updateTime !== a.updateTime || prev.sort !== a.sort) {
+              changes.push({
+                bookId: a.bookId,
+                title: a.title,
+                prevUpdateTime: prev.updateTime,
+                currUpdateTime: a.updateTime,
+                prevSort: prev.sort,
+                currSort: a.sort
+              });
+            }
+          }
+        });
+
+        // 保存当前快照
+        if (env.WR_KV) {
+          await env.WR_KV.put('mp_monitor_snap', JSON.stringify(mpAccounts));
+        }
+
+        return new Response(JSON.stringify({
+          ok: true,
+          totalMp: mpAccounts.length,
+          changes: changes,
+          changesCount: changes.length,
+          hasPrevSnapshot: !!prevRaw,
+          sampleFields: mpAccounts.slice(0, 3),
+          timestamp: new Date().toISOString()
+        }), {
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      }
+    }
+
+    // POST /mp/monitor/reset → 清除监控快照（重新开始基线）
+    if (request.method === 'POST' && url.pathname === '/mp/monitor/reset') {
+      try {
+        if (env.WR_KV) {
+          await env.WR_KV.delete('mp_monitor_snap');
+        }
+        return new Response(JSON.stringify({ ok: true, message: 'Monitor snapshot cleared' }), {
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS }
+        });
+      }
+    }
+
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
   }
 };
